@@ -1,0 +1,115 @@
+# webui 设置页表单的字段清单（schema 驱动）。
+# 只列「值得在页面暴露」的高价值字段；其余配置用设置页的「高级编辑(YAML)」子页兜底。
+# 每个字段：
+#   path   : config 中的点分路径（deep_update / ruamel 回写都用它）
+#   label  : 中文标签
+#   type   : number | slider | text | bool | choice | secret | count(非负整数,0=自动→null)
+#   其余    : min/max/step(slider,number)、choices(choice)、info(说明)
+groups:
+  - title: 剧集（换剧一站式）
+    fields:
+      - {path: narration.continuity.series_name, label: 剧名, type: text, info: 进解说 prompt「剧名」+命名连续性文件；换剧时改这里}
+      - {path: narration.continuity.enabled, label: 跨集连续性追踪(上集回顾), type: bool}
+      - {path: video.series_background_file, label: 背景文件路径, type: text, info: 通常固定 data/series_background.md；换剧只改「剧情背景」页里的内容}
+
+  - title: 视频 / 输入
+    fields:
+      - {path: video.skip_intro_seconds, label: 片头跳过(秒), type: number, min: 0, max: 600, step: 5}
+      - {path: video.skip_outro_seconds, label: 片尾跳过(秒), type: number, min: 0, max: 600, step: 5}
+      - {path: max_parts, label: 拆分子视频数(1=不拆), type: number, min: 1, max: 6, step: 1}
+
+  - title: 语音识别 (ASR)
+    fields:
+      - {path: asr.model, label: Whisper 模型, type: choice, choices: [tiny, base, small, medium, large-v3]}
+      - {path: asr.language, label: 语言, type: choice, choices: [ko, zh, en, ja]}
+      - {path: asr.diarize, label: 说话人分离(需HF token), type: bool}
+      - {path: asr.min_speakers, label: 最少说话人数(0=自动), type: count, info: 填已知主要角色数下限，限定范围能显著提升分离准确度}
+      - {path: asr.max_speakers, label: 最多说话人数(0=自动), type: count, info: 填含配角的人数上限，如 12}
+      - {path: asr.compute_type, label: 计算精度, type: choice, choices: [float16, int8, float32]}
+      - {path: asr.batch_size, label: 批大小, type: number, min: 1, max: 32, step: 1}
+
+  - title: 说话人命名
+    fields:
+      - {path: asr.split_by_speaker, label: 按说话人拆分转写段, type: bool, info: 用词级归属把跨人的长段拆成单人片段；关掉会退回「一段20秒跨好几个人只标多数派」}
+      - {path: naming.enabled, label: 启用真名替换, type: bool, info: LLM 读台词把 SPEAKER_xx 换成角色真名；需要背景资料里有角色介绍}
+      - {path: naming.max_dialogue_chars, label: 命名对白上限(字), type: number, min: 4000, max: 60000, step: 2000, info: 喂给 LLM 的本集对白量；超出按整集均匀抽样}
+
+  - title: 人脸标注
+    fields:
+      - {path: faces.device, label: 人脸检测设备, type: choice, choices: [auto, cpu, cuda], info: CPU 最稳；auto 仅在 GPU 空闲显存足够时启用 CUDA}
+      - {path: faces.gpu_min_free_mb, label: GPU 最低空闲显存(MB), type: number, min: 1024, max: 16384, step: 512}
+      - {path: faces.cpu_threads, label: CPU 核数上限, type: number, min: 1, max: 8, step: 1}
+      - {path: faces.max_frames, label: 单次最多抽帧数, type: number, min: 12, max: 240, step: 4}
+      - {path: faces.max_faces_per_frame, label: 每帧最多保留人脸数, type: number, min: 1, max: 16, step: 1}
+      - {path: faces.timeout_seconds, label: 人脸任务超时(秒), type: number, min: 60, max: 3600, step: 30}
+      - {path: faces.match_threshold, label: 认定阈值(正脸), type: slider, min: 0.25, max: 0.7, step: 0.02, info: 高于此直接认定}
+      - {path: faces.match_margin, label: 领先幅度(侧脸), type: slider, min: 0.02, max: 0.20, step: 0.01, info: 分数不够高但比第二名领先此值即认定；认不出侧脸就调小，张冠李戴就调大}
+      - {path: faces.match_floor, label: 认定分数下限, type: slider, min: 0.20, max: 0.45, step: 0.02, info: 低于此一律不认，防陌生人误判}
+      - {path: faces.profile_attach_threshold, label: 侧脸吸附距离上限, type: slider, min: 0.5, max: 0.9, step: 0.02, info: 建库时侧脸并入核心簇的松阈值}
+      - {path: faces.flip_tta, label: 镜像增强, type: bool, info: 与镜像图 embedding 平均，跨姿态更稳；改动后须重建人脸库}
+  - title: 画面备注 (VLM)
+    fields:
+      - {path: scene_notes.enabled, label: 启用画面备注, type: bool, info: VLM 看画面出备注，解说照着画面写，防张冠李戴}
+      - {path: scene_notes.backend, label: 后端, type: choice, choices: [local, api], info: local=本机GPU免费；api=OpenAI兼容多模态端点}
+      - {path: scene_notes.local_model, label: 本地模型, type: text}
+      - {path: scene_notes.frames_per_beat, label: 每拍抽帧数, type: number, min: 1, max: 6, step: 1}
+      - {path: scene_notes.batch_size, label: VLM 批量拍数, type: number, min: 1, max: 12, step: 1, info: 显存不足调小；本地后端提速主要靠它}
+      - {path: scene_notes.max_pixels, label: 单图像素上限, type: number, min: 100352, max: 802816, step: 50176, info: 除以784=每图视觉token数，prefill 耗时第一因素}
+      - {path: scene_notes.max_new_tokens, label: 每拍生成上限, type: number, min: 64, max: 512, step: 16}
+      - {path: scene_notes.api.base_url, label: API 地址(api后端), type: text}
+      - {path: scene_notes.api.model_name, label: API 模型名, type: text}
+      - {path: scene_notes.api.api_key, label: API Key, type: secret}
+
+  - title: LLM
+    fields:
+      - {path: llm.base_url, label: API 地址, type: text}
+      - {path: llm.model_name, label: 模型名, type: text}
+      - {path: llm.api_key, label: API Key, type: secret}
+
+  - title: 解说 / 剪辑
+    fields:
+      - {path: narration.enabled, label: 启用解说, type: bool}
+      - {path: narration.explain.mode, label: 剪辑模式, type: choice, choices: [picture_led, narration_led, remix]}
+      - {path: narration.explain.cut_style, label: picture_led 选材, type: choice, choices: [bridge, skeleton, pure]}
+      - {path: narration.explain.target_minutes, label: 目标时长(分), type: slider, min: 2, max: 15, step: 0.5}
+      - {path: narration.explain.min_minutes, label: 时长下限(分), type: slider, min: 2, max: 15, step: 0.5}
+      - {path: narration.explain.max_minutes, label: 时长上限(分), type: slider, min: 2, max: 20, step: 0.5}
+      - {path: narration.explain.max_beats, label: 最多节拍数, type: slider, min: 5, max: 40, step: 1}
+      - {path: narration.explain.chars_per_second, label: 解说语速(字/秒), type: slider, min: 3.0, max: 6.0, step: 0.1}
+      - {path: narration.explain.hook_preview, label: remix 钩子前置预告, type: bool}
+      - {path: narration.explain.hook_preview_seconds, label: 预告时长(秒), type: slider, min: 3, max: 6, step: 0.5}
+      - {path: narration.generation.style, label: 解说风格, type: choice, choices: [casual, dramatic, humorous]}
+      - {path: narration.explain.self_check, label: 解说一致性自检, type: bool, info: TTS 前 LLM 校对张冠李戴/无中生有/剧透并改写，多一次调用}
+
+  - title: TTS 配音
+    fields:
+      - {path: narration.tts.engine, label: TTS 引擎, type: choice, choices: [edge, volcano]}
+      - {path: narration.tts.edge.voice, label: edge 音色, type: text}
+      - {path: narration.tts.edge.rate, label: edge 语速, type: text, info: 如 +10% / -10%}
+      - {path: narration.tts.edge.pitch, label: edge 音调, type: text, info: 如 +20Hz}
+      - {path: narration.tts.volcano.speaker, label: 火山音色 ID, type: text}
+      - {path: narration.tts.volcano.access_token, label: 火山 AccessToken, type: secret}
+
+  - title: 混音
+    fields:
+      - {path: narration.mixing.narration_volume, label: 解说音量, type: slider, min: 0.5, max: 3.0, step: 0.1}
+      - {path: narration.mixing.explain_original_volume, label: 解说时原声压低到, type: slider, min: 0.0, max: 0.5, step: 0.01}
+      - {path: narration.mixing.original_volume_recover, label: 无解说时原声恢复到, type: slider, min: 0.3, max: 1.0, step: 0.05}
+      - {path: narration.mixing.duck_ramp, label: 压低/恢复过渡(秒), type: slider, min: 0.0, max: 1.0, step: 0.05}
+
+  - title: remix 评论
+    fields:
+      - {path: commentary.generation.max_length, label: 单条评论最大字数, type: number, min: 8, max: 40, step: 1}
+      - {path: commentary.generation.auto_interval, label: 约几秒一条评论, type: number, min: 4, max: 30, step: 1}
+      - {path: commentary.generation.explain_ratio, label: 解读型占比, type: slider, min: 0.0, max: 1.0, step: 0.05}
+      - {path: commentary.generation.review_ratio, label: 影评型占比, type: slider, min: 0.0, max: 1.0, step: 0.05}
+      - {path: commentary.font_size, label: 评论字号, type: number, min: 20, max: 60, step: 2}
+
+  - title: 字幕 / 标题 / 署名
+    fields:
+      - {path: subtitle.enabled, label: 启用字幕, type: bool}
+      - {path: narration.caption.font_size, label: 解说字幕字号, type: number, min: 24, max: 64, step: 2}
+      - {path: narration.caption.font_color, label: 解说字幕颜色, type: text}
+      - {path: description.font_size, label: 开头标题字号, type: number, min: 30, max: 90, step: 2}
+      - {path: author.enabled, label: 显示署名, type: bool}
+      - {path: author.name, label: 署名文字, type: text}

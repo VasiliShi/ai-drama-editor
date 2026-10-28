@@ -1,0 +1,231 @@
+# 配置模板。使用方法：cp config.yaml.example config.yaml，再按需修改。
+# config.yaml 含密钥，已被 .gitignore 忽略，请勿提交。
+# 密钥处为占位符 YOUR_*，请替换为真实值；也可写成 ${ENV_VAR} 从环境变量注入。
+
+video:
+  input_dir: "input"                       # 输入视频目录
+  skip_intro_seconds: 90                   # 片头曲时长(秒)，自动排除
+  skip_outro_seconds: 180                  # 片尾曲时长(秒)，自动排除
+  series_background_file: "data/series_background.md"   # 剧集背景外置到文件，内容见该文件
+asr:
+  model: "medium"                           # tiny | base | small | medium | large-v3（剧情类建议 small+）
+  language: "zh"                           # 片源语言：zh | en | ja | ko 等
+  # ── WhisperX 说话人分离（diarization）──
+  diarize: true                             # true=输出每段 speaker(SPEAKER_00/01…)，需 HF token
+  compute_type: "float16"                   # float16(GPU,质量好) | int8(省显存) | float32(CPU)
+  batch_size: 16                            # faster-whisper 批大小，显存紧张可调小
+  min_speakers: 4                           # 已知说话人数下限可填(如 2)，留空自动
+  max_speakers: 18                          # 上限可填(如 8)，留空自动；限定范围能提升准确度
+  split_by_speaker: true                    # 按词级 speaker 把跨人的长转写段拆成单人片段。⚠️关掉会退回「一段20秒跨好几个人只标多数派」，命名与剧情归属都会不准
+  speaker_gap: 1.0                          # 同一人内部停顿超此(秒)也断开成新段
+
+# ── 说话人命名（把 SPEAKER_xx 换成角色真名）────────────────────
+# 靠读台词，不靠听声音：身份信号绝大多数直接写在对白里（自称「朕」「奴婢」、
+# 称谓「大人」「干爹」、报职务「我是河道监管李玄」）。每集独立命名，无需建库、
+# 无需人工标注；跨集一致性由「名字都取自同一份角色表」保证。
+# 前提：video.series_background_file 里有角色介绍（角色表会自动抽取并缓存）。
+naming:
+  enabled: true                             # 总开关：true 时转写的 speaker 用真名
+  roster_file: "data/cast_roster.json"      # 角色表缓存(自动生成,背景文件变了才重抽)
+  max_dialogue_chars: 24000                 # 喂给 LLM 的本集对白上限(超出按整集均匀抽样)
+
+# ── 人脸库（人脸先行标注 + 运行期确定性认人）─────────────────────
+# 流程：webui「人脸标注」页 ①生成候选(说话时刻抽帧→检脸→聚类) ②看脸打名字
+# ③保存 → face_gallery.json + data/cast/真名.jpg。
+# 建库后：画面备注(VLM)把人脸认出的名字作为已知事实注入(VLM 只描述动作,不再隔空认人)。
+faces:
+  det_model: "buffalo_l"                    # InsightFace 模型包(检测+ArcFace embedding)
+  device: "auto"                          # auto=GPU空闲显存≥gpu_min_free_mb才用CUDA,否则回退CPU;子进程用完即退不驻留
+  gpu_min_free_mb: 4096                    # auto 模式仅在至少保留此显存时使用 GPU
+  cpu_threads: 2                           # CPU 回退与抽帧最多使用的核心数
+  max_frames: 400                          # 单次建库最多抽帧数(GPU下约20秒;样本越多姿态越全、簇越稳)
+  max_faces_per_frame: 3                   # 每帧最多保留几张脸(按面积×置信度优先大脸,防背景路人刷簇)
+  timeout_seconds: 900                     # WebUI 人脸子进程超时后自动终止
+  sample_dir: "output/faces"                # 帧与人脸裁剪导出目录
+  manifest_file: "data/face_manifest.json"  # 标注候选清单(生成产物)
+  gallery_file: "data/face_gallery.json"    # 人脸库:真名→质心向量(标注产物)
+  cluster_threshold: 0.60                   # 两段式第二段:正脸散脸吸附到核心簇的距离上限
+  core_threshold: 0.35                      # 两段式第一段:紧阈值聚"确定同人"核心簇(只用正脸)
+  profile_attach_threshold: 0.72            # 侧脸吸附到核心簇的距离上限(比正脸松:同人跨姿态余弦本就低)
+  outlier_sim: 0.30                         # 簇内提纯:正脸成员与质心相似度低于此踢出
+  profile_outlier_sim: 0.20                 # 侧脸成员的提纯门槛(更松,否则刚吸进来又被剔掉)
+  match_threshold: 0.45                     # 运行期比对:高于此直接认定(正脸走这条)
+  match_floor: 0.30                         # 相对判据下限:低于此一律不认
+  match_margin: 0.06                        # 相对判据:分数≥match_floor 且比第二名高出此值即认定(侧脸靠这条)
+  exemplars_per_person: 8                   # 每簇存几个多姿态样本进库(正脸+左右侧脸),运行期取max相似度
+  flip_tta: true                            # embedding 与镜像图平均,提升跨姿态稳定性。⚠️改动后须重建人脸库
+  # ── 建库闸门(严):只有过闸的脸才配当聚类核心 ──
+  min_face: 60                              # 忽略短边小于此像素的脸(远景/路人)
+  min_det_score: 0.50                       # 检测置信度下限(低置信=遮挡/角度差,embedding噪声大)
+  min_blur: 20                              # 清晰度下限(Laplacian方差),糊脸不建核心
+  min_eye_ratio: 0.16                       # 眼距/框宽低于此判为侧脸:不再丢弃,只是不参与建核心
+  # ── 运行期闸门(松):侧脸/稍糊也要交给匹配器,检测阶段丢脸=主动放弃识别 ──
+  query_min_face: 40                        # 运行期最小人脸短边像素
+  query_min_det_score: 0.40                 # 运行期检测置信度下限
+  query_min_blur: 8                         # 运行期清晰度下限
+  frames_per_speaker: 24                    # 每个(集,speaker)最多抽几帧找脸(样本越多配角越不容易被当噪声)
+  num_candidates: 30                        # 标注页最多展示的人物数(宁多看几个路人格,别把角色截没)
+  max_episodes: 6                           # 建库最多用几集(主角前几集全亮相,几十集也不用全扫)
+
+# ── 画面备注（VLM 看画面，防解说张冠李戴/无中生有）──────────────
+# 只看剧情分析选中的节拍(省钱)；结果按节拍指纹缓存，重跑解说零 VLM 成本。
+# data/cast/ 下放「角色名.jpg」脸部截图（人脸标注页会自动生成），VLM 会用真名指认出镜人物。
+scene_notes:
+  enabled: false                            # 总开关：true 时解说/评论 prompt 逐拍附画面备注(需本地 VLM 或多模态 API)
+  backend: "local"                          # local(本机GPU,免费) | api(OpenAI兼容多模态端点)
+  local_model: "Qwen/Qwen3-VL-2B-Instruct"  # 本地 VLM：HF 模型名或本地目录；bf16 约 4.5GB 显存
+  api:
+    base_url: ""                            # OpenAI 兼容多模态端点
+    api_key: ""
+    model_name: ""                          # 支持图片输入的模型名
+  frames_per_beat: 3                        # 每拍抽几帧(均匀采样)
+  max_edge: 512                             # 帧最长边缩到此像素(直接决定 VLM token 成本)
+  max_pixels: 401408                        # 单图视觉 token 上限×28×28(=512token/图);prefill 耗时的第一因素
+  cast_dir: "data/cast"                     # 角色参考图目录(可为空)
+  max_cast_refs: 6                          # 最多发几张 cast 参考图;人脸库已建时直接发 0 张(改用文字事实注入)
+  batch_size: 4                             # 本地 VLM 批量推理的拍数(显存不足调小)
+  extract_workers: 4                        # 抽帧并发线程数(每帧一个 ffmpeg 进程)
+  max_new_tokens: 160                       # 每拍备注生成上限(JSON 实际只需约80)
+
+llm:
+  base_url: "https://api.deepseek.com/v1"       # 任意 OpenAI 兼容 API 地址
+  api_key: "YOUR_API_KEY"              # ← 占位符，替换为真实密钥
+  model_name: "deepseek-chat"                 # 模型名称
+
+# 节拍/时长策略（整体传给分析器）
+strategy:
+  target_duration: 6                       # 目标总时长(分钟)
+  min_duration: 4
+  max_duration: 8
+  min_clip_duration: 30
+  max_clip_duration: 360
+  max_clips: 8
+  validation_retries: 3
+  narrative_coherence: true
+
+transition:
+  duration: 0.5                            # 片段间黑屏过渡(秒)
+
+max_parts: 1                               # 一个视频拆成 N 个子视频（1=不拆分）
+
+output_formats:
+  - aspect_ratio: "9:16"
+    target_resolution: "1080x1920"
+    suffix: "_portrait"
+  - aspect_ratio: "16:9"
+    target_resolution: "1920x1080"
+    suffix: "_landscape"
+
+subtitle:
+  enabled: true
+  font_path: "fonts/wqy-microhei.ttc"      # 中文字体路径
+
+# ── 电影解说（explain-only）核心 ──────────────────────────────
+narration:
+  enabled: true                            # 解说总开关
+  tts:
+    engine: "edge"                           # edge(微软免费云,无需GPU/额度) | volcano(火山,付费)
+    concurrency: 4                           # 并发合成路数(网络IO瓶颈,串行一集干等2-3分钟)
+    edge:
+      voice: "zh-CN-YunxiNeural"             # 云希 Microsoft Yunxi，中文(普通话) 男声｜zh-CN-YunyangNeural
+      rate: "+40%"                           # 语速(实测5.37字/秒;+50%≈5.75)。⚠️与 explain.chars_per_second 联动,改这里要同步改那边(否则音画错位)
+      pitch: "+0Hz"                          # 音调，如 "+20Hz" / "-20Hz"
+      volume: "+0%"                          # 音量
+      timeout: 60                            # 单次合成超时(秒)；微软端点偶发挂死，超时即重试(最多5次)
+    volcano:
+      auth_mode: "app_id"                  # app_id(旧版 AppID+AccessToken，当前账号在用) | api_key(新版单密钥)
+      app_id: "YOUR_TOKEN"        # ← auth_mode=app_id 时使用
+      access_token: "YOUR_TOKEN"  # ← auth_mode=app_id 时使用
+      api_key: "YOUR_API_KEY"      # ← auth_mode=api_key 时使用（X-Api-Key）
+      resource_id: "seed-tts-2.0"          # 资源/音色版本
+      speaker: "zh_male_qingcang_uranus_bigtts"   # ← 音色 ID，按账号可用音色填写
+      endpoint: "https://openspeech.bytedance.com/api/v3/tts/unidirectional"
+      sample_rate: 24000
+      speech_rate: 20                        # 语速 -50 ~ 100（0=正常）；留空则不传
+      loudness_rate: 0                      # 音量增益；留空则不传
+  explain:
+    mode: "picture_led"                     # narration_led(旁白主导/蒙太奇) | picture_led(画面主导+旁白覆盖) | remix(原声混剪+影评评论,无旁白)
+    cut_style: "bridge"                      # picture_led 选材: bridge(高潮+解说桥接) | skeleton(主线骨架+高潮) | pure(纯高潮爽剪)
+    hook_preview: true                       # remix: 最高钩子节拍截 3-6 秒前置作开头预告(完整片段留在原时间线)
+    hook_preview_seconds: 5                  # remix: 预告时长(秒)，代码限制 3~6
+    target_minutes: 7                       # 目标成片时长(分钟)，画面长度由解说时长反推
+    min_minutes: 6                          # picture_led 成片时长下限(分钟)：低于此会让 LLM 多覆盖剧情重做
+    max_minutes: 9                          # picture_led 成片时长上限(分钟)：超过此会让 LLM 精简重做，仍超则等比压缩兜底
+    max_beats: 30                           # 最多节拍数
+    chars_per_second: 5.4                   # 解说语速估算(字/秒),用于反推画面时长。⚠️=TTS实际语速:edge rate +40% 实测5.37;改 rate 要同步改这里
+    self_check: true                        # 解说一致性自检:TTS 前逐拍校对归因/无中生有/剧透，违规改写(多一次LLM调用)
+    clip_pad: 0.4                           # 每个画面前后留白(秒)
+  generation:
+    style: "casual"                         # casual(口语) | dramatic(戏剧化) | humorous(幽默)
+    max_chars_per_segment: 60               # 每段配音最大字数
+  continuity:
+    enabled: true                           # 跨集连续性追踪
+    series_name: ""                         # 剧集名称（填入后自动追踪连续性，启用「上集回顾」）
+  mixing:
+    narration_duration: 15                  # 每段开头配音最大时长(秒)，自动匹配 TTS 实际时长
+    narration_volume: 1.5                   # 解说配音音量增益
+    original_volume: 0.1                     # 配音期间原声压低音量(0~1)（explain 用下方 explain_original_volume）
+    explain_original_volume: 0.08           # 解说覆盖时段原声压低到此音量(保留环境声)
+    original_volume_recover: 1.0            # picture_led：无解说时段原声恢复到此音量(1.0=原片满音量)
+    duck_ramp: 0.3                          # picture_led：压低/恢复的平滑过渡时长(秒)，防音量突变爆音
+  caption:
+    font_size: 42                           # 底部解说字幕字号
+    font_color: "orange"                     # 字色
+    y_position: 0.70                        # 字幕条垂直位置比例(0~1)，0.80=靠近底部
+
+# ── remix(混剪评论)模式：叠加在画面上的影评/弹幕评论 ─────────────
+commentary:
+  generation:
+    max_length: 20                          # 单条评论最大字数
+    auto_interval: 12                       # 约每 N 秒一条评论(决定每拍条数,2~8 条)
+    explain_ratio: 0.4                      # 解读型占比(点明谁在做什么/潜台词)
+    review_ratio: 0.3                       # 影评型占比(导演手法/演技/剧作结构)；其余为共鸣型
+    style_note: ""                          # 补充风格要求(可留空)
+  self_check: true                          # 整集评论 LLM 自检(张冠李戴/无中生有改写或删除)
+  font_size: 32                             # 评论字号(文本自动包「」,落在左半屏贴近水平中线)
+  duration: 4                               # 单条显示时长(秒)
+  explain_color: "white"                    # 解读型字色
+  review_color: "gold"                      # 影评型字色
+  emotion_color: "orange"                   # 共鸣型字色
+
+# 开头标题（优先用 hook_title）
+description:
+  enabled: true
+  font_size: 60
+  font_color: "orange"
+  y_offset: 0.8                            # 在黑边中的垂直位置比例 0~1，调大更靠下
+
+# 作者署名（竖排显示在右侧）
+author:
+  enabled: true
+  name: "你的署名"
+  font_size: 36
+  font_color: "orange"
+
+# 片头二次创作声明
+copyright_notice:
+  enabled: true
+  text: "二次创作 · 仅供交流"
+  font_size: 36
+  font_color: "white"
+  display_duration: 4                       # 显示时长(秒)
+
+# 片尾文字
+ending:
+  enabled: false
+  text: "感谢观看"
+  font_size: 48
+  font_color: "white"
+  fade_duration: 1.5                        # 结尾视频+音频淡出时长(秒)
+  display_duration: 3                       # 显示时长(秒)
+
+bgm:
+  enabled: false                            # 背景音乐替换
+  file: ""                                  # BGM 音频文件路径(mp3/wav)
+  volume: 0.15
+  fade_in: 2.0
+  fade_out: 3.0
+
+logging:
+  level: "INFO"                             # DEBUG | INFO | WARNING | ERROR
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

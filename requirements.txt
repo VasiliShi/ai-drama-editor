@@ -1,0 +1,16 @@
+# 基础依赖（剧情分析 / 评论 / 裁剪 / 渲染 / Web 操作台）
+pyyaml>=6.0
+ruamel.yaml>=0.18
+httpx[socks]>=0.27
+json-repair>=0.30
+gradio>=6.0
+psutil>=5.9
+numpy>=1.26
+edge-tts>=6.1
+
+# ASR + 说话人分离：版本必须钉住（whisperx 4.x 要求 torch 2.8 + pyannote 4，与本项目不兼容）
+# torch / torchaudio 请先按 README 单独安装，再装下面这些
+whisperx==3.3.1
+pyannote.audio==3.3.2
+faster-whisper==1.1.1
+ctranslate2==4.5.0

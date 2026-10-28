@@ -1,0 +1,30 @@
+# ===== 数据/输出（不纳入版本管理）=====
+data/
+input/
+output/
+fonts/
+logs/
+session.txt
+
+# ===== 本地配置（含密钥）=====
+config.yaml
+*.bak
+.env
+
+# ===== Python 缓存 =====
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# ===== IDE / 系统文件 =====
+.ipynb_checkpoints/
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ===== 虚拟环境 =====
+.venv/
+venv/

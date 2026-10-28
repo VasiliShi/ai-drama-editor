@@ -1,0 +1,10 @@
+# 可选：人脸标注（webui「人脸标注」页）
+insightface>=0.7.3
+onnxruntime-gpu>=1.18        # 无 GPU 时改装 onnxruntime
+opencv-python>=4.8
+scikit-learn>=1.3
+
+# 可选：画面备注本地 VLM（scene_notes.backend: local）
+transformers>=4.57
+accelerate>=1.0
+qwen-vl-utils>=0.0.14

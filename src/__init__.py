@@ -1,0 +1,1 @@
+# Video Editor - AI-powered video clipping tool
